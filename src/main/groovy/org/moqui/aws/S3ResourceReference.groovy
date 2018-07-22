@@ -314,10 +314,23 @@ class S3ResourceReference extends BaseResourceReference {
         try {
             if (autoCreateBucket && bucketName != newBucketName && !s3Client.doesBucketExistV2(newBucketName)) s3Client.createBucket(newBucketName)
 
-            // FUTURE: handle source version somehow, maybe different move or copy method? pass as third parameter to CopyObjectRequest constructor
-            CopyObjectRequest copyObjRequest = new CopyObjectRequest(bucketName, path, newBucketName, newPath)
-            s3Client.copyObject(copyObjRequest)
-            s3Client.deleteObject(bucketName, path)
+            // if this is a file move directly, if a directory move all files with its prefix
+            if ((knownDirectory != null && !knownDirectory.booleanValue()) || s3Client.doesObjectExist(bucketName, path)) {
+                // FUTURE: handle source version somehow, maybe different move or copy method? pass as third parameter to CopyObjectRequest constructor
+                s3Client.copyObject(bucketName, path, newBucketName, newPath)
+                s3Client.deleteObject(bucketName, path)
+            } else {
+                ListObjectsV2Request lor = new ListObjectsV2Request().withBucketName(bucketName).withPrefix(path + "/")
+                ListObjectsV2Result result = s3Client.listObjectsV2(lor)
+                // objects (files in directory and all sub-directories)
+                List<S3ObjectSummary> objectList = result.getObjectSummaries()
+                for (S3ObjectSummary s3os in objectList) {
+                    String srcPath = s3os.getKey()
+                    String destPath = srcPath.replace(path, newPath)
+                    s3Client.copyObject(bucketName, srcPath, newBucketName, destPath)
+                    s3Client.deleteObject(bucketName, srcPath)
+                }
+            }
         } catch (AmazonS3Exception e) {
             if (e.getStatusCode() == 404) {
                 logger.warn("Not found (404) error in move for bucket ${bucketName} path ${path}: ${e.toString()}")
