@@ -44,7 +44,6 @@ import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
 
-// TODO: catch and wrap AmazonServiceException throughout? is a RuntimeException anyway
 // TODO: need to worry about ResetException? would have to use temp files for all puts, see https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/best-practices.html
 
 /*
@@ -240,17 +239,39 @@ class S3ResourceReference extends BaseResourceReference {
 
     @Override boolean supportsLastModified() { true }
     @Override long getLastModified() {
-        ObjectMetadata om = s3Client.getObjectMetadata(getBucketName(location), getPath(location))
-        if (om == null) return 0
-        return om.getLastModified()?.getTime()
+        AmazonS3 s3Client = getS3Client()
+        String bucketName = getBucketName(location)
+        String path = getPath(location)
+
+        try {
+            ObjectMetadata om = s3Client.getObjectMetadata(bucketName, path)
+            if (om == null) return 0
+            return om.getLastModified()?.getTime()
+        } catch (AmazonS3Exception e) {
+            if (e.getStatusCode() == 404) {
+                logger.warn("Not found (404) error in getLastModified for bucket ${bucketName} path ${path}: ${e.toString()}")
+                return 0
+            } else { throw e }
+        }
     }
 
     @Override boolean supportsSize() { true }
     @Override long getSize() {
-        ObjectMetadata om = s3Client.getObjectMetadata(getBucketName(location), getPath(location))
-        if (om == null) return 0
-        // NOTE: or use getInstanceLength()?
-        return om.getContentLength()
+        AmazonS3 s3Client = getS3Client()
+        String bucketName = getBucketName(location)
+        String path = getPath(location)
+
+        try {
+            ObjectMetadata om = s3Client.getObjectMetadata(bucketName, path)
+            if (om == null) return 0
+            // NOTE: or use getInstanceLength()?
+            return om.getContentLength()
+        } catch (AmazonS3Exception e) {
+            if (e.getStatusCode() == 404) {
+                logger.warn("Not found (404) error in getSize for bucket ${bucketName} path ${path}: ${e.toString()}")
+                return 0
+            } else { throw e }
+        }
     }
 
     @Override boolean supportsWrite() { true }
@@ -290,12 +311,19 @@ class S3ResourceReference extends BaseResourceReference {
         String newBucketName = getBucketName(newLocation)
         String newPath = getPath(newLocation)
 
-        if (autoCreateBucket && bucketName != newBucketName && !s3Client.doesBucketExistV2(newBucketName)) s3Client.createBucket(newBucketName)
+        try {
+            if (autoCreateBucket && bucketName != newBucketName && !s3Client.doesBucketExistV2(newBucketName)) s3Client.createBucket(newBucketName)
 
-        // FUTURE: handle source version somehow, maybe different move or copy method? pass as third parameter to CopyObjectRequest constructor
-        CopyObjectRequest copyObjRequest = new CopyObjectRequest(bucketName, path, newBucketName, newPath)
-        s3Client.copyObject(copyObjRequest)
-        s3Client.deleteObject(bucketName, path)
+            // FUTURE: handle source version somehow, maybe different move or copy method? pass as third parameter to CopyObjectRequest constructor
+            CopyObjectRequest copyObjRequest = new CopyObjectRequest(bucketName, path, newBucketName, newPath)
+            s3Client.copyObject(copyObjRequest)
+            s3Client.deleteObject(bucketName, path)
+        } catch (AmazonS3Exception e) {
+            if (e.getStatusCode() == 404) {
+                logger.warn("Not found (404) error in move for bucket ${bucketName} path ${path}: ${e.toString()}")
+                throw new BaseArtifactException("Could not move, file not found for bucket ${bucketName} path ${path}")
+            } else { throw e }
+        }
     }
 
     @Override ResourceReference makeDirectory(String name) {
@@ -324,43 +352,41 @@ class S3ResourceReference extends BaseResourceReference {
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
-        GetObjectMetadataRequest gomr = new GetObjectMetadataRequest(bucketName, path, versionName)
-        ObjectMetadata om = s3Client.getObjectMetadata(gomr)
-        // TODO: use setUserMetadata(Map<String,String> userMetadata) and getUserMetadata() for userId, needs to be on app puts/etc
-        // TODO: worth a separate request to try to get previousVersionName? doesn't seem to be easy way to do that either...
-        return new Version(this, om.getVersionId(), null, null, new Timestamp(om.getLastModified().getTime()))
-    }
-    @Override Version getCurrentVersion() {
-        AmazonS3 s3Client = getS3Client()
-        String bucketName = getBucketName(location)
-        String path = getPath(location)
-
         try {
-            ObjectMetadata om = s3Client.getObjectMetadata(bucketName, path)
-            String versionName = om.getVersionId()
-            if (versionName == null || versionName.isEmpty()) return null
+            GetObjectMetadataRequest gomr = new GetObjectMetadataRequest(bucketName, path)
+            if (versionName) gomr.withVersionId(versionName)
+            ObjectMetadata om = s3Client.getObjectMetadata(gomr)
+            if (!om.getVersionId()) return null
             // TODO: use setUserMetadata(Map<String,String> userMetadata) and getUserMetadata() for userId, needs to be on app puts/etc
             // TODO: worth a separate request to try to get previousVersionName? doesn't seem to be easy way to do that either...
-            return new Version(this, versionName, null, null, new Timestamp(om.getLastModified().getTime()))
+            return new Version(this, om.getVersionId(), null, null, new Timestamp(om.getLastModified().getTime()))
         } catch (AmazonS3Exception e) {
             if (e.getStatusCode() == 404) {
-                logger.warn("Not found (404) error in get version for bucket ${bucketName} path ${path}: ${e.toString()}")
+                logger.warn("Not found (404) error in getVersion for bucket ${bucketName} path ${path}: ${e.toString()}")
                 return null
             } else { throw e }
         }
     }
+    @Override Version getCurrentVersion() { return getVersion(null) }
     @Override Version getRootVersion() {
         AmazonS3 s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
-        // NOTE: assuming this does oldest first, needs testing, docs not clear on any of this stuff
-        ListVersionsRequest lvr = new ListVersionsRequest().withBucketName(bucketName).withPrefix(path).withMaxResults(1)
-        VersionListing vl = s3Client.listVersions(lvr)
-        List<S3VersionSummary> s3vsList = vl.getVersionSummaries()
-        if (s3vsList == null || s3vsList.size() == 0) return null
-        S3VersionSummary s3vs = s3vsList.get(0)
-        return new Version(this, s3vs.getVersionId(), null, null, new Timestamp(s3vs.getLastModified().getTime()))
+        try {
+            // NOTE: assuming this does oldest first, needs testing, docs not clear on any of this stuff
+            ListVersionsRequest lvr = new ListVersionsRequest().withBucketName(bucketName).withPrefix(path).withMaxResults(1)
+            VersionListing vl = s3Client.listVersions(lvr)
+            List<S3VersionSummary> s3vsList = vl.getVersionSummaries()
+            if (s3vsList == null || s3vsList.size() == 0) return null
+            S3VersionSummary s3vs = s3vsList.get(0)
+            return new Version(this, s3vs.getVersionId(), null, null, new Timestamp(s3vs.getLastModified().getTime()))
+        } catch (AmazonS3Exception e) {
+            if (e.getStatusCode() == 404) {
+                logger.warn("Not found (404) error in getRootVersion for bucket ${bucketName} path ${path}: ${e.toString()}")
+                return null
+            } else { throw e }
+        }
     }
     @Override ArrayList<Version> getVersionHistory() {
         return getNextVersions(null)
@@ -370,15 +396,26 @@ class S3ResourceReference extends BaseResourceReference {
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
+        ListVersionsRequest lvr = new ListVersionsRequest().withBucketName(bucketName).withPrefix(path)
         // NOTE: any way to get versions that have this versionName as the previous version? doesn't seem so, ie no branching just linear list so just get next version
-        ListVersionsRequest lvr = new ListVersionsRequest().withBucketName(bucketName).withPrefix(path).withMaxResults(1)
-        if (versionName != null && !versionName.isEmpty()) lvr.withVersionIdMarker(versionName)
-        VersionListing vl = s3Client.listVersions(lvr)
-        List<S3VersionSummary> s3vsList = vl.getVersionSummaries()
-        ArrayList<Version> verList = new ArrayList<>(s3vsList.size())
-        for (S3VersionSummary s3vs in s3vsList)
-            verList.add(new Version(this, s3vs.getVersionId(), null, null, new Timestamp(s3vs.getLastModified().getTime())))
-        return verList
+        if (versionName != null && !versionName.isEmpty()) lvr.withVersionIdMarker(versionName).withMaxResults(1)
+
+        try {
+            VersionListing vl = s3Client.listVersions(lvr)
+            List<S3VersionSummary> s3vsList = vl.getVersionSummaries()
+            ArrayList<Version> verList = new ArrayList<>(s3vsList.size())
+            String prevVersion = null
+            for (S3VersionSummary s3vs in s3vsList) {
+                verList.add(new Version(this, s3vs.getVersionId(), prevVersion, null, new Timestamp(s3vs.getLastModified().getTime())))
+                prevVersion = s3vs.getVersionId()
+            }
+            return verList
+        } catch (AmazonS3Exception e) {
+            if (e.getStatusCode() == 404) {
+                logger.warn("Not found (404) error in getNextVersions for bucket ${bucketName} path ${path} version ${versionName}: ${e.toString()}")
+                return null
+            } else { throw e }
+        }
     }
     @Override InputStream openStream(String versionName) {
         if (versionName == null || versionName.isEmpty()) return openStream()
