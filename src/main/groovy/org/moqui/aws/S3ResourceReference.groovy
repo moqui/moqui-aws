@@ -15,7 +15,6 @@ package org.moqui.aws
 
 import com.amazonaws.services.s3.AmazonS3
 import com.amazonaws.services.s3.model.AmazonS3Exception
-import com.amazonaws.services.s3.model.CopyObjectRequest
 import com.amazonaws.services.s3.model.GetObjectMetadataRequest
 import com.amazonaws.services.s3.model.GetObjectRequest
 import com.amazonaws.services.s3.model.ListObjectsV2Request
@@ -64,6 +63,26 @@ class S3ResourceReference extends BaseResourceReference {
     public final static String locationPrefix = "aws3://"
     public final static boolean autoCreateBucket = true
 
+    // don't static init this, just in case inits before ExecutionContextFactoryImpl inits and sets default properties
+    private static Map<String, String> bucketAliasMapInternal = null
+    static Map<String, String> getBucketAliasMap() {
+        if (bucketAliasMapInternal != null) return bucketAliasMapInternal
+        Map<String, String> tempAliasMap = new HashMap<>()
+        for (int i = 1; i < 9; i++) {
+            String alias = System.getProperty("aws_s3_bucket_alias" + i)
+            String name = System.getProperty("aws_s3_bucket_name" + i)
+            if (alias && name) {
+                tempAliasMap.put(alias, name)
+            } else {
+                alias = System.getenv("aws_s3_bucket_alias" + i)
+                name = System.getenv("aws_s3_bucket_name" + i)
+                if (alias && name) tempAliasMap.put(alias, name)
+            }
+        }
+        bucketAliasMapInternal = tempAliasMap
+        return bucketAliasMapInternal
+    }
+
     String location
     Boolean knownDirectory = (Boolean) null
 
@@ -95,6 +114,12 @@ class S3ResourceReference extends BaseResourceReference {
         int slashIdx = fullPath.indexOf("/")
         String bName = slashIdx == -1 ? fullPath : fullPath.substring(0, slashIdx)
         if (!bName) throw new BaseArtifactException("No bucket name (first path segment) in location ${location}")
+
+        // see if bucket name is an alias
+        Map<String, String> aliasMap = getBucketAliasMap()
+        String aliasName = aliasMap.get(bName)
+        if (aliasName != null && !aliasName.isEmpty()) bName = aliasName
+
         return bName
     }
     static String getPath(String location) {
@@ -287,10 +312,10 @@ class S3ResourceReference extends BaseResourceReference {
     }
     @Override void putStream(InputStream stream) {
         if (stream == null) return
-        AmazonS3 s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
+        AmazonS3 s3Client = getS3Client()
         if (autoCreateBucket && !s3Client.doesBucketExistV2(bucketName)) s3Client.createBucket(bucketName)
 
         // NOTE: can specify more options using ObjectMetadata object as 4th parameter

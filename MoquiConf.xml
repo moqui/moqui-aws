@@ -11,6 +11,15 @@
     <default-property name="AWS_ACCESS_KEY_ID" value=""/>
     <default-property name="AWS_SECRET_ACCESS_KEY" value=""/>
 
+    <!-- these must be used in pairs, if alias used in a aws3://{bucket}/... then is replaced with name -->
+    <!-- only 3 sets here by default, code looks for 1-9 -->
+    <default-property name="aws_s3_bucket_alias1" value=""/>
+    <default-property name="aws_s3_bucket_name1" value=""/>
+    <default-property name="aws_s3_bucket_alias2" value=""/>
+    <default-property name="aws_s3_bucket_name2" value=""/>
+    <default-property name="aws_s3_bucket_alias3" value=""/>
+    <default-property name="aws_s3_bucket_name3" value=""/>
+
     <tools>
         <tool-factory class="org.moqui.aws.S3ClientToolFactory" init-priority="40" disabled="false"/>
     </tools>
