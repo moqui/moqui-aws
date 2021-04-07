@@ -11,6 +11,9 @@
     <default-property name="AWS_ACCESS_KEY_ID" value=""/>
     <default-property name="AWS_SECRET_ACCESS_KEY" value=""/>
 
+    <!-- Support non standard s3 service, for example Minio -->
+    <default-property name="AWS_ENDPOINT_URL" value=""/>
+
     <!-- these must be used in pairs, if alias used in a aws3://{bucket}/... then is replaced with name -->
     <!-- only 3 sets here by default, code looks for 1-9 -->
     <default-property name="aws_s3_bucket_alias1" value=""/>
