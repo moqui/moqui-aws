@@ -13,6 +13,8 @@
  */
 package org.moqui.aws
 
+import com.amazonaws.client.builder.AwsClientBuilder
+import com.amazonaws.regions.Regions
 import com.amazonaws.services.s3.AmazonS3
 import com.amazonaws.services.s3.AmazonS3ClientBuilder
 import groovy.transform.CompileStatic
@@ -48,6 +50,9 @@ class S3ClientToolFactory implements ToolFactory<AmazonS3> {
         String awsRegion = SystemBinding.getPropOrEnv("AWS_REGION")
         String awsAccessKeyId = SystemBinding.getPropOrEnv("AWS_ACCESS_KEY_ID")
         String awsSecret = SystemBinding.getPropOrEnv("AWS_SECRET_ACCESS_KEY")
+
+        // Non standard AWS, for example Minio.
+        String awsEndpointURL = SystemBinding.getPropOrEnv("AWS_ENDPOINT_URL")
         if (awsAccessKeyId && awsSecret) {
             System.setProperty("aws.accessKeyId", awsAccessKeyId)
             System.setProperty("aws.secretKey", awsSecret)
@@ -57,6 +62,7 @@ class S3ClientToolFactory implements ToolFactory<AmazonS3> {
 
         AmazonS3ClientBuilder cb = AmazonS3ClientBuilder.standard()
         if (awsRegion) cb.withRegion(awsRegion)
+        if (awsEndpointURL) cb.withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(awsEndpointURL, Regions.US_EAST_1.name()))
         s3Client = cb.build()
     }
 
