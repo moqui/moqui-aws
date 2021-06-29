@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-2.1.xsd">
+
+    <service verb="publish" noun="SmsMessage">
+        <in-parameters>
+            <parameter name="countryCode"/>
+            <parameter name="areaCode"/>
+            <parameter name="contactNumber" required="true"/>
+            <parameter name="message" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="successful" type="Boolean"/>
+            <parameter name="messageId"/>
+            <parameter name="errorMessage"/>
+        </out-parameters>
+        <actions>
+            <if condition="countryCode &amp;&amp; !countryCode.trim().startsWith('+')">
+                <set field="countryCode" from="'+' + countryCode.trim()"/>
+            </if>
+            <set field="phoneNumber" from="(countyCode?:'') + (areaCode?.trim()?:'') + (contactNumber?.trim()?:'')"/>
+            <set field="hasPlus" from="phoneNumber.startsWith('+')"/>
+            <set field="phoneNumber" from="(hasPlus ? '+' : '') + phoneNumber.replaceAll('\D', '')"/>
+
+            <script>
+                import software.amazon.awssdk.services.sns.SnsClient
+                import software.amazon.awssdk.services.sns.model.PublishRequest
+                import software.amazon.awssdk.services.sns.model.PublishResponse
+
+                try {
+                    SnsClient snsClient = ec.getTool('AwsSnsClient', SnsClient.class)
+
+                    PublishRequest request = PublishRequest.builder()
+                        .message(message)
+                        .phoneNumber(phoneNumber)
+                        .build()
+
+                    PublishResponse result = snsClient.publish(request)
+
+                    messageId = result.getMessageId()
+                    successful = true
+                } catch (Exception e) {
+                    ec.logger.error('Error sending SMS message to ${phoneNumber}', e)
+                    errorMessage = (e instanceof AwsServiceException) ? ((AwsServiceException)e).awsErrorDetails().errorMessage() : e.getMessage()
+                    successful = false
+                }
+            </script>
+
+        </actions>
+    </service>
+
+</services>

@@ -13,19 +13,16 @@
  */
 package org.moqui.aws
 
-import com.amazonaws.services.s3.AmazonS3
-import com.amazonaws.services.s3.model.AmazonS3Exception
-import com.amazonaws.services.s3.model.GetObjectMetadataRequest
-import com.amazonaws.services.s3.model.GetObjectRequest
-import com.amazonaws.services.s3.model.ListObjectsV2Request
-import com.amazonaws.services.s3.model.ListObjectsV2Result
-import com.amazonaws.services.s3.model.ListVersionsRequest
-import com.amazonaws.services.s3.model.ObjectMetadata
-import com.amazonaws.services.s3.model.S3Object
-import com.amazonaws.services.s3.model.S3ObjectInputStream
-import com.amazonaws.services.s3.model.S3ObjectSummary
-import com.amazonaws.services.s3.model.S3VersionSummary
-import com.amazonaws.services.s3.model.VersionListing
+import software.amazon.awssdk.core.ResponseBytes
+import software.amazon.awssdk.core.ResponseInputStream
+import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.model.GetObjectRequest
+import software.amazon.awssdk.services.s3.model.GetObjectResponse
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request
+import software.amazon.awssdk.services.s3.model.S3Exception
+import software.amazon.awssdk.services.s3.model.S3Object
 
 import groovy.transform.CompileStatic
 
@@ -47,12 +44,12 @@ import java.sql.Timestamp
 
 /*
 Handy Docs:
-https://docs.aws.amazon.com/AmazonS3/latest/dev/UsingTheMPJavaAPI.html
-https://docs.aws.amazon.com/AmazonS3/latest/dev/ObjectOperations.html
+https://docs.aws.amazon.com/S3Client/latest/dev/UsingTheMPJavaAPI.html
+https://docs.aws.amazon.com/S3Client/latest/dev/ObjectOperations.html
 https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/examples-s3-objects.html
 
 Important Classes:
-https://docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/s3/AmazonS3.html
+https://docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/s3/S3Client.html
 https://docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/s3/model/S3Object.html
 https://docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/s3/model/ObjectMetadata.html
  */
@@ -135,16 +132,19 @@ class S3ResourceReference extends BaseResourceReference {
     }
 
     @Override InputStream openStream() {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
         try {
-            S3Object obj = s3Client.getObject(bucketName, path)
-            S3ObjectInputStream s3is = obj.getObjectContent()
-            return s3is
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+            GetObjectRequest objectRequest = (GetObjectRequest) GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(path)
+                    .build()
+            ResponseInputStream<GetObjectResponse> objectResponse = s3Client.getObject(objectRequest)
+            return objectResponse.newObjectInputStream()
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in openStream for bucket ${bucketName} path ${path}: ${e.toString()}")
                 return null
             } else { throw e }
@@ -157,14 +157,19 @@ class S3ResourceReference extends BaseResourceReference {
     }
 
     @Override String getText() {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
         try {
-            return s3Client.getObjectAsString(bucketName, path)
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+            GetObjectRequest objectRequest = (GetObjectRequest) GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(path)
+                    .build()
+            ResponseBytes<GetObjectResponse> objectResponse = s3Client.getObjectAsBytes(objectRequest)
+            return objectResponse.asUtf8String()
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in getText for bucket ${bucketName} path ${path}: ${e.toString()}")
                 return null
             } else { throw e }
@@ -178,20 +183,33 @@ class S3ResourceReference extends BaseResourceReference {
 
     @Override boolean supportsDirectory() { true }
     @Override boolean isFile() {
+        S3Client s3Client = getS3Client()
+        String bucketName = getBucketName(location)
+        String path = getPath(location)
+
         if (knownDirectory != null) return !knownDirectory.booleanValue()
-        // NOTE how to determine? if exists is file should do for now
-        if (s3Client.doesObjectExist(getBucketName(location), getPath(location))) {
+        try {
+            HeadObjectRequest objectRequest = (HeadObjectRequest) HeadObjectRequest.builder()
+                    .bucket(getBucketName(location))
+                    .key(getPath(location))
+                    .build()
+            HeadObjectResponse objectResponse = s3Client.headObject(objectRequest)
             knownDirectory = Boolean.FALSE
             return true
-        } else {
-            return false
+        } catch (S3Exception e) {
+            if (e.statusCode() == 403) {
+                logger.warn("Not authorized (403) error in isFile for bucket ${bucketName} path ${path}: ${e.toString()}")
+                return false
+            } else if (e.statusCode() == 404) {
+                return false
+            } else { throw e }
         }
     }
     @Override boolean isDirectory() {
         // logger.warn("isDirectory loc ${location} knownDirectory ${knownDirectory}")
         if (knownDirectory != null) return knownDirectory.booleanValue()
 
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
         if (!path) return true // consider root a directory
@@ -212,7 +230,7 @@ class S3ResourceReference extends BaseResourceReference {
         }
     }
     @Override List<ResourceReference> getDirectoryEntries() {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -240,7 +258,7 @@ class S3ResourceReference extends BaseResourceReference {
     @Override boolean getExists() {
         if (knownDirectory != null && knownDirectory.booleanValue()) return true
 
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -264,7 +282,7 @@ class S3ResourceReference extends BaseResourceReference {
 
     @Override boolean supportsLastModified() { true }
     @Override long getLastModified() {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -282,7 +300,7 @@ class S3ResourceReference extends BaseResourceReference {
 
     @Override boolean supportsSize() { true }
     @Override long getSize() {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -302,7 +320,7 @@ class S3ResourceReference extends BaseResourceReference {
     @Override boolean supportsWrite() { true }
     @Override void putText(String text) {
         // FUTURE: use diff from last version for text
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -315,7 +333,7 @@ class S3ResourceReference extends BaseResourceReference {
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         if (autoCreateBucket && !s3Client.doesBucketExistV2(bucketName)) s3Client.createBucket(bucketName)
 
         // NOTE: can specify more options using ObjectMetadata object as 4th parameter
@@ -329,7 +347,7 @@ class S3ResourceReference extends BaseResourceReference {
         if (!newLocation.startsWith(locationPrefix))
             throw new BaseArtifactException("Location [${newLocation}] is not a s3 location, not moving resource at ${getLocation()}")
 
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -375,7 +393,7 @@ class S3ResourceReference extends BaseResourceReference {
         return newRef
     }
     @Override boolean delete() {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -386,7 +404,7 @@ class S3ResourceReference extends BaseResourceReference {
 
     @Override boolean supportsVersion() { return true }
     @Override Version getVersion(String versionName) {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -407,7 +425,7 @@ class S3ResourceReference extends BaseResourceReference {
     }
     @Override Version getCurrentVersion() { return getVersion(null) }
     @Override Version getRootVersion() {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -430,7 +448,7 @@ class S3ResourceReference extends BaseResourceReference {
         return getNextVersions(null)
     }
     @Override ArrayList<Version> getNextVersions(String versionName) {
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -458,7 +476,7 @@ class S3ResourceReference extends BaseResourceReference {
     @Override InputStream openStream(String versionName) {
         if (versionName == null || versionName.isEmpty()) return openStream()
 
-        AmazonS3 s3Client = getS3Client()
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
@@ -476,8 +494,8 @@ class S3ResourceReference extends BaseResourceReference {
     }
     @Override String getText(String versionName) { return ObjectUtilities.getStreamText(openStream(versionName)) }
 
-    AmazonS3 getS3Client() {
-        AmazonS3 s3Client = ecf.getTool(S3ClientToolFactory.TOOL_NAME, AmazonS3.class)
+    S3Client getS3Client() {
+        S3Client s3Client = ecf.getTool(S3ClientToolFactory.TOOL_NAME, S3Client.class)
         if (s3Client == null) throw new BaseException("AWS S3 Client not initialized")
         return s3Client
     }

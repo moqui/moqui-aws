@@ -37,8 +37,9 @@ tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
 
 dependencies {
     compile project(':framework')
-    // AWS Java SDK for S3 (depends on core and kms jars)
-    compile group: 'com.amazonaws', name: 'aws-java-sdk-s3', version: '1.11.371' // Apache 2.0
+    // AWS Java SDK for supported services (depends on core and kms jars)
+    compile group: 'software.amazon.awssdk', name: 's3', version: '2.16.92' // Apache 2.0
+    compile group: 'software.amazon.awssdk', name: 'sns', version: '2.16.92' // Apache 2.0
 }
 
 // by default the Java plugin runs test on build, change to not do that (only run test if explicit task)
