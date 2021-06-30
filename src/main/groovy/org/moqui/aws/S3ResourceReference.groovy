@@ -15,12 +15,19 @@ package org.moqui.aws
 
 import software.amazon.awssdk.core.ResponseBytes
 import software.amazon.awssdk.core.ResponseInputStream
+import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.model.CommonPrefix
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
 import software.amazon.awssdk.services.s3.model.GetObjectRequest
 import software.amazon.awssdk.services.s3.model.GetObjectResponse
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response
+import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import software.amazon.awssdk.services.s3.model.S3Exception
 import software.amazon.awssdk.services.s3.model.S3Object
 
@@ -162,10 +169,7 @@ class S3ResourceReference extends BaseResourceReference {
         String path = getPath(location)
 
         try {
-            GetObjectRequest objectRequest = (GetObjectRequest) GetObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(path)
-                    .build()
+            GetObjectRequest objectRequest = (GetObjectRequest) GetObjectRequest.builder().bucket(bucketName).key(path).build()
             ResponseBytes<GetObjectResponse> objectResponse = s3Client.getObjectAsBytes(objectRequest)
             return objectResponse.asUtf8String()
         } catch (S3Exception e) {
@@ -187,14 +191,16 @@ class S3ResourceReference extends BaseResourceReference {
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
+        return doesObjectExist(s3Client, bucketName, path)
+    }
+
+    boolean doesObjectExist(S3Client s3Client, String bucketName, String path) {
         if (knownDirectory != null) return !knownDirectory.booleanValue()
         try {
-            HeadObjectRequest objectRequest = (HeadObjectRequest) HeadObjectRequest.builder()
-                    .bucket(getBucketName(location))
-                    .key(getPath(location))
-                    .build()
-            HeadObjectResponse objectResponse = s3Client.headObject(objectRequest)
-            knownDirectory = Boolean.FALSE
+            HeadObjectRequest objectRequest = (HeadObjectRequest) HeadObjectRequest.builder().bucket(bucketName).key(path).build()
+            // if throws exception then does not exist
+            s3Client.headObject(objectRequest)
+            knownDirectory = Boolean.FALSE // known file
             return true
         } catch (S3Exception e) {
             if (e.statusCode() == 403) {
@@ -205,6 +211,21 @@ class S3ResourceReference extends BaseResourceReference {
             } else { throw e }
         }
     }
+
+    /** handle directories by seeing if is a prefix with any files, limit 1 for efficiency */
+    boolean doesPathExist(S3Client s3Client, String bucketName, String path) {
+        if (knownDirectory != null) return knownDirectory.booleanValue()
+        ListObjectsV2Request lor = (ListObjectsV2Request) ListObjectsV2Request.builder().bucket(bucketName).prefix(path)
+                .delimiter("/").maxKeys(1).build()
+        ListObjectsV2Response result = s3Client.listObjectsV2(lor)
+        if (result.hasContents() || result.hasCommonPrefixes()) {
+            knownDirectory = Boolean.TRUE
+            return true
+        } else {
+            return false
+        }
+    }
+
     @Override boolean isDirectory() {
         // logger.warn("isDirectory loc ${location} knownDirectory ${knownDirectory}")
         if (knownDirectory != null) return knownDirectory.booleanValue()
@@ -214,20 +235,9 @@ class S3ResourceReference extends BaseResourceReference {
         String path = getPath(location)
         if (!path) return true // consider root a directory
 
-        // how to determine? not exists but has files in it
-        if (s3Client.doesObjectExist(bucketName, path)) {
-            knownDirectory = Boolean.FALSE
-            return false
-        }
-
-        ListObjectsV2Request lor = new ListObjectsV2Request().withBucketName(bucketName).withPrefix(path).withDelimiter("/").withMaxKeys(1)
-        ListObjectsV2Result result = s3Client.listObjectsV2(lor)
-        if (result.getObjectSummaries() || result.getCommonPrefixes()) {
-            knownDirectory = Boolean.TRUE
-            return true
-        } else {
-            return false
-        }
+        // how to determine? not exists (not an object/file) but has files in it
+        if (doesObjectExist(s3Client, bucketName, path)) return false
+        return doesPathExist(s3Client, bucketName, path)
     }
     @Override List<ResourceReference> getDirectoryEntries() {
         S3Client s3Client = getS3Client()
@@ -236,18 +246,20 @@ class S3ResourceReference extends BaseResourceReference {
 
         // logger.warn("getDirectoryEntries bucket ${bucketName} path ${path}")
 
-        ListObjectsV2Request lor = new ListObjectsV2Request().withBucketName(bucketName).withPrefix(path + "/").withDelimiter("/")
-        ListObjectsV2Result result = s3Client.listObjectsV2(lor)
+        ListObjectsV2Request lor = (ListObjectsV2Request) ListObjectsV2Request.builder().bucket(bucketName).prefix(path + "/")
+                .delimiter("/").build()
+        ListObjectsV2Response result = s3Client.listObjectsV2(lor)
         // common prefixes (sub-directories)
-        List<String> commonPrefixList = result.getCommonPrefixes()
+        List<CommonPrefix> commonPrefixList = result.commonPrefixes()
         // objects (files in directory)
-        List<S3ObjectSummary> objectList = result.getObjectSummaries()
+        List<S3Object> objectList = result.contents()
         // add to the list
         ArrayList<ResourceReference> entryList = new ArrayList<>(commonPrefixList.size() + objectList.size())
-        for (String subDir in commonPrefixList)
-            entryList.add(new S3ResourceReference().init(location + '/' + subDir, Boolean.TRUE, ecf))
-        for (S3ObjectSummary os in objectList)
-            entryList.add(new S3ResourceReference().init(locationPrefix + os.getBucketName() + '/' + os.getKey(), Boolean.FALSE, ecf))
+        for (CommonPrefix subDir in commonPrefixList)
+            entryList.add(new S3ResourceReference().init(location + '/' + subDir.prefix(), Boolean.TRUE, ecf))
+        // NOTE: consider using alias for bucketName instead of straight bucketName
+        for (S3Object os in objectList)
+            entryList.add(new S3ResourceReference().init(locationPrefix + bucketName + '/' + os.key(), Boolean.FALSE, ecf))
         // logger.warn("sub-dirs: ${commonPrefixList.join(', ')}")
         // logger.warn("files: ${objectList.collect({it.getKey()}).join(', ')}")
         // logger.warn("RR entries: ${entryList.collect({it.toString()}).join(', ')}")
@@ -256,28 +268,18 @@ class S3ResourceReference extends BaseResourceReference {
 
     @Override boolean supportsExists() { true }
     @Override boolean getExists() {
-        if (knownDirectory != null && knownDirectory.booleanValue()) return true
+        // if knownDirectory not null exists, if true then directory if false then file
+        if (knownDirectory != null) return true
 
         S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
         // first see if it's a file
-        boolean existingFile = s3Client.doesObjectExist(bucketName, path)
-        if (existingFile) {
-            knownDirectory = Boolean.FALSE // known file
-            return true
-        }
+        boolean existingFile = doesObjectExist(s3Client, bucketName, path)
+        if (existingFile) return true
 
-        // handle directories by seeing if is a prefix with any files, limit 1 for efficiency
-        ListObjectsV2Request lor = new ListObjectsV2Request().withBucketName(bucketName).withPrefix(path).withDelimiter("/").withMaxKeys(1)
-        ListObjectsV2Result result = s3Client.listObjectsV2(lor)
-        if (result.getObjectSummaries() || result.getCommonPrefixes()) {
-            knownDirectory = Boolean.TRUE
-            return true
-        } else {
-            return false
-        }
+        return doesPathExist(s3Client, bucketName, path)
     }
 
     @Override boolean supportsLastModified() { true }
@@ -287,11 +289,12 @@ class S3ResourceReference extends BaseResourceReference {
         String path = getPath(location)
 
         try {
-            ObjectMetadata om = s3Client.getObjectMetadata(bucketName, path)
-            if (om == null) return 0
-            return om.getLastModified()?.getTime()
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+            HeadObjectRequest objectRequest = (HeadObjectRequest) HeadObjectRequest.builder().bucket(bucketName).key(path).build()
+            // if throws exception then does not exist
+            HeadObjectResponse response = s3Client.headObject(objectRequest)
+            response.lastModified().toEpochMilli()
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in getLastModified for bucket ${bucketName} path ${path}: ${e.toString()}")
                 return 0
             } else { throw e }
@@ -305,15 +308,30 @@ class S3ResourceReference extends BaseResourceReference {
         String path = getPath(location)
 
         try {
-            ObjectMetadata om = s3Client.getObjectMetadata(bucketName, path)
-            if (om == null) return 0
-            // NOTE: or use getInstanceLength()?
-            return om.getContentLength()
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+            HeadObjectRequest objectRequest = (HeadObjectRequest) HeadObjectRequest.builder().bucket(bucketName).key(path).build()
+            // if throws exception then does not exist
+            HeadObjectResponse response = s3Client.headObject(objectRequest)
+            response.lastModified().toEpochMilli()
+            return response.contentLength()
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in getSize for bucket ${bucketName} path ${path}: ${e.toString()}")
                 return 0
             } else { throw e }
+        }
+    }
+
+    void autoCreateBucket(S3Client s3Client, String bucketName) {
+        try {
+            // if throws exception then does not exist
+            s3Client.headBucket((HeadBucketRequest) HeadBucketRequest.builder().bucket(bucketName).build())
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                // not found, create bucket
+
+            } else {
+                throw e
+            }
         }
     }
 
@@ -324,22 +342,24 @@ class S3ResourceReference extends BaseResourceReference {
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
-        if (autoCreateBucket && !s3Client.doesBucketExistV2(bucketName)) s3Client.createBucket(bucketName)
+        if (autoCreateBucket) autoCreateBucket(s3Client, bucketName)
 
-        s3Client.putObject(bucketName, path, text)
+        s3Client.putObject((PutObjectRequest) PutObjectRequest.builder().bucket(bucketName).key(path).build(), RequestBody.fromString(text))
     }
     @Override void putStream(InputStream stream) {
         if (stream == null) return
+        S3Client s3Client = getS3Client()
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
-        S3Client s3Client = getS3Client()
-        if (autoCreateBucket && !s3Client.doesBucketExistV2(bucketName)) s3Client.createBucket(bucketName)
+        if (autoCreateBucket) autoCreateBucket(s3Client, bucketName)
 
-        // NOTE: can specify more options using ObjectMetadata object as 4th parameter
+        // NOTE: can specify more options using ObjectMetadata
         // NOTE: return PutObjectResult with more info, including version/etc
-        // FUTURE: somehow ObjectMetadata.setContentLength()? without that will locally buffer entire stream to calculate length, ie Content-Length HTTP header required for REST API
-        s3Client.putObject(bucketName, path, stream, null)
+        // requires content length, all we have is an InputStream (not resettable) so read into byte[]
+        ByteArrayOutputStream baos = new ByteArrayOutputStream()
+        ObjectUtilities.copyStream(stream, baos)
+        s3Client.putObject((PutObjectRequest) PutObjectRequest.builder().bucket(bucketName).key(path).build(), RequestBody.fromBytes(baos.toByteArray()))
     }
 
     @Override void move(String newLocation) {
@@ -355,27 +375,30 @@ class S3ResourceReference extends BaseResourceReference {
         String newPath = getPath(newLocation)
 
         try {
-            if (autoCreateBucket && bucketName != newBucketName && !s3Client.doesBucketExistV2(newBucketName)) s3Client.createBucket(newBucketName)
+            if (autoCreateBucket && bucketName != newBucketName) autoCreateBucket(s3Client, newBucketName)
 
             // if this is a file move directly, if a directory move all files with its prefix
-            if ((knownDirectory != null && !knownDirectory.booleanValue()) || s3Client.doesObjectExist(bucketName, path)) {
+            if ((knownDirectory != null && !knownDirectory.booleanValue()) || doesObjectExist(s3Client, bucketName, path)) {
                 // FUTURE: handle source version somehow, maybe different move or copy method? pass as third parameter to CopyObjectRequest constructor
-                s3Client.copyObject(bucketName, path, newBucketName, newPath)
-                s3Client.deleteObject(bucketName, path)
+                s3Client.copyObject((CopyObjectRequest) CopyObjectRequest.builder().copySource(bucketName + '/' + path)
+                        .destinationBucket(newBucketName).destinationKey(newPath).build())
+                s3Client.deleteObject((DeleteObjectRequest) DeleteObjectRequest.builder().bucket(bucketName).key(path).build())
             } else {
-                ListObjectsV2Request lor = new ListObjectsV2Request().withBucketName(bucketName).withPrefix(path + "/")
-                ListObjectsV2Result result = s3Client.listObjectsV2(lor)
+                ListObjectsV2Request lor = (ListObjectsV2Request) ListObjectsV2Request.builder().bucket(bucketName).prefix(path + "/")
+                        .delimiter("/").build()
+                ListObjectsV2Response result = s3Client.listObjectsV2(lor)
                 // objects (files in directory and all sub-directories)
-                List<S3ObjectSummary> objectList = result.getObjectSummaries()
-                for (S3ObjectSummary s3os in objectList) {
-                    String srcPath = s3os.getKey()
+                List<S3Object> objectList = result.contents()
+                for (S3Object s3os in objectList) {
+                    String srcPath = s3os.key()
                     String destPath = srcPath.replace(path, newPath)
-                    s3Client.copyObject(bucketName, srcPath, newBucketName, destPath)
-                    s3Client.deleteObject(bucketName, srcPath)
+                    s3Client.copyObject((CopyObjectRequest) CopyObjectRequest.builder().copySource(bucketName + '/' + srcPath)
+                            .destinationBucket(newBucketName).destinationKey(destPath).build())
+                    s3Client.deleteObject((DeleteObjectRequest) DeleteObjectRequest.builder().bucket(bucketName).key(srcPath).build())
                 }
             }
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in move for bucket ${bucketName} path ${path}: ${e.toString()}")
                 throw new BaseArtifactException("Could not move, file not found for bucket ${bucketName} path ${path}")
             } else { throw e }
@@ -397,8 +420,8 @@ class S3ResourceReference extends BaseResourceReference {
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
-        if (!s3Client.doesObjectExist(bucketName, path)) return false
-        s3Client.deleteObject(bucketName, path)
+        if (!doesObjectExist(s3Client, bucketName, path)) return false
+        s3Client.deleteObject((DeleteObjectRequest) DeleteObjectRequest.builder().bucket(bucketName).key(path).build())
         return true
     }
 
