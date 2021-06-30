@@ -54,7 +54,7 @@ class SnsClientToolFactory implements ToolFactory<SnsClient> {
         String awsEndpointURL = SystemBinding.getPropOrEnv("AWS_ENDPOINT_URL")
         if (awsAccessKeyId && awsSecret) {
             System.setProperty("aws.accessKeyId", awsAccessKeyId)
-            System.setProperty("aws.secretKey", awsSecret)
+            System.setProperty("aws.secretAccessKey", awsSecret)
         }
 
         logger.info("Starting AWS SNS Client with region ${awsRegion} access ID ${awsAccessKeyId}")

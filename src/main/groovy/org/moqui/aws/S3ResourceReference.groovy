@@ -147,12 +147,9 @@ class S3ResourceReference extends BaseResourceReference {
         String path = getPath(location)
 
         try {
-            GetObjectRequest objectRequest = (GetObjectRequest) GetObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(path)
-                    .build()
+            GetObjectRequest objectRequest = (GetObjectRequest) GetObjectRequest.builder().bucket(bucketName).key(path).build()
             ResponseInputStream<GetObjectResponse> objectResponse = s3Client.getObject(objectRequest)
-            return objectResponse.newObjectInputStream()
+            return objectResponse
         } catch (S3Exception e) {
             if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in openStream for bucket ${bucketName} path ${path}: ${e.toString()}")
@@ -376,6 +373,8 @@ class S3ResourceReference extends BaseResourceReference {
 
         String newBucketName = getBucketName(newLocation)
         String newPath = getPath(newLocation)
+
+        if (bucketName == newBucketName && path == newPath) return
 
         try {
             if (autoCreateBucket && bucketName != newBucketName) autoCreateBucket(s3Client, newBucketName)

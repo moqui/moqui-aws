@@ -54,7 +54,7 @@ class S3ClientToolFactory implements ToolFactory<S3Client> {
         String awsEndpointURL = SystemBinding.getPropOrEnv("AWS_ENDPOINT_URL")
         if (awsAccessKeyId && awsSecret) {
             System.setProperty("aws.accessKeyId", awsAccessKeyId)
-            System.setProperty("aws.secretKey", awsSecret)
+            System.setProperty("aws.secretAccessKey", awsSecret)
         }
 
         logger.info("Starting AWS S3 Client with region ${awsRegion} access ID ${awsAccessKeyId}")
