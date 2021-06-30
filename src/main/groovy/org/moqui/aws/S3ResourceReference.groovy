@@ -25,8 +25,11 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse
+import software.amazon.awssdk.services.s3.model.ListObjectVersionsRequest
+import software.amazon.awssdk.services.s3.model.ListObjectVersionsResponse
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response
+import software.amazon.awssdk.services.s3.model.ObjectVersion
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import software.amazon.awssdk.services.s3.model.S3Exception
 import software.amazon.awssdk.services.s3.model.S3Object
@@ -292,7 +295,7 @@ class S3ResourceReference extends BaseResourceReference {
             HeadObjectRequest objectRequest = (HeadObjectRequest) HeadObjectRequest.builder().bucket(bucketName).key(path).build()
             // if throws exception then does not exist
             HeadObjectResponse response = s3Client.headObject(objectRequest)
-            response.lastModified().toEpochMilli()
+            return response.lastModified().toEpochMilli()
         } catch (S3Exception e) {
             if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in getLastModified for bucket ${bucketName} path ${path}: ${e.toString()}")
@@ -432,15 +435,18 @@ class S3ResourceReference extends BaseResourceReference {
         String path = getPath(location)
 
         try {
-            GetObjectMetadataRequest gomr = new GetObjectMetadataRequest(bucketName, path)
-            if (versionName) gomr.withVersionId(versionName)
-            ObjectMetadata om = s3Client.getObjectMetadata(gomr)
-            if (!om.getVersionId()) return null
+            HeadObjectRequest.Builder requestBuilder = HeadObjectRequest.builder().bucket(bucketName).key(path)
+            if (versionName) requestBuilder.versionId(versionName)
+            // if throws exception then does not exist
+            HeadObjectResponse response = s3Client.headObject((HeadObjectRequest) requestBuilder.build())
+
+            if (!response.versionId()) return null
+
             // TODO: use setUserMetadata(Map<String,String> userMetadata) and getUserMetadata() for userId, needs to be on app puts/etc
             // TODO: worth a separate request to try to get previousVersionName? doesn't seem to be easy way to do that either...
-            return new Version(this, om.getVersionId(), null, null, new Timestamp(om.getLastModified().getTime()))
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+            return new Version(this, response.versionId(), null, null, new Timestamp(response.lastModified().toEpochMilli()))
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in getVersion for bucket ${bucketName} path ${path}: ${e.toString()}")
                 return null
             } else { throw e }
@@ -454,14 +460,16 @@ class S3ResourceReference extends BaseResourceReference {
 
         try {
             // NOTE: assuming this does oldest first, needs testing, docs not clear on any of this stuff
-            ListVersionsRequest lvr = new ListVersionsRequest().withBucketName(bucketName).withPrefix(path).withMaxResults(1)
-            VersionListing vl = s3Client.listVersions(lvr)
-            List<S3VersionSummary> s3vsList = vl.getVersionSummaries()
-            if (s3vsList == null || s3vsList.size() == 0) return null
-            S3VersionSummary s3vs = s3vsList.get(0)
-            return new Version(this, s3vs.getVersionId(), null, null, new Timestamp(s3vs.getLastModified().getTime()))
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+            ListObjectVersionsRequest request = (ListObjectVersionsRequest) ListObjectVersionsRequest.builder().bucket(bucketName)
+                    .prefix(path).maxKeys(1).build()
+            ListObjectVersionsResponse response = s3Client.listObjectVersions(request)
+            List<ObjectVersion> versionList = response.versions()
+            if (versionList == null || versionList.size() == 0) return null
+            ObjectVersion version = versionList.get(0)
+
+            return new Version(this, version.versionId(), null, null, new Timestamp(version.lastModified().toEpochMilli()))
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in getRootVersion for bucket ${bucketName} path ${path}: ${e.toString()}")
                 return null
             } else { throw e }
@@ -475,22 +483,23 @@ class S3ResourceReference extends BaseResourceReference {
         String bucketName = getBucketName(location)
         String path = getPath(location)
 
-        ListVersionsRequest lvr = new ListVersionsRequest().withBucketName(bucketName).withPrefix(path)
+        ListObjectVersionsRequest.Builder requestBuilder = ListObjectVersionsRequest.builder().bucket(bucketName).prefix(path)
         // NOTE: any way to get versions that have this versionName as the previous version? doesn't seem so, ie no branching just linear list so just get next version
-        if (versionName != null && !versionName.isEmpty()) lvr.withVersionIdMarker(versionName).withMaxResults(1)
+        if (versionName != null && !versionName.isEmpty()) requestBuilder.versionIdMarker(versionName).maxKeys(1)
 
         try {
-            VersionListing vl = s3Client.listVersions(lvr)
-            List<S3VersionSummary> s3vsList = vl.getVersionSummaries()
+            ListObjectVersionsResponse response = s3Client.listObjectVersions((ListObjectVersionsRequest) requestBuilder.build())
+            List<ObjectVersion> s3vsList = response.versions()
+
             ArrayList<Version> verList = new ArrayList<>(s3vsList.size())
             String prevVersion = null
-            for (S3VersionSummary s3vs in s3vsList) {
-                verList.add(new Version(this, s3vs.getVersionId(), prevVersion, null, new Timestamp(s3vs.getLastModified().getTime())))
-                prevVersion = s3vs.getVersionId()
+            for (ObjectVersion s3vs in s3vsList) {
+                verList.add(new Version(this, s3vs.versionId(), prevVersion, null, new Timestamp(s3vs.lastModified().toEpochMilli())))
+                prevVersion = s3vs.versionId()
             }
             return verList
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in getNextVersions for bucket ${bucketName} path ${path} version ${versionName}: ${e.toString()}")
                 return null
             } else { throw e }
@@ -504,12 +513,12 @@ class S3ResourceReference extends BaseResourceReference {
         String path = getPath(location)
 
         try {
-            GetObjectRequest gor = new GetObjectRequest(bucketName, path, versionName)
-            S3Object obj = s3Client.getObject(gor)
-            S3ObjectInputStream s3is = obj.getObjectContent()
-            return s3is
-        } catch (AmazonS3Exception e) {
-            if (e.getStatusCode() == 404) {
+            GetObjectRequest.Builder getBuilder = GetObjectRequest.builder().bucket(bucketName).key(path)
+            if (versionName != null && !versionName.isEmpty()) getBuilder.versionId(versionName)
+            ResponseInputStream<GetObjectResponse> response = s3Client.getObject((GetObjectRequest) getBuilder.build())
+            return response
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
                 logger.warn("Not found (404) error in openStream for bucket ${bucketName} path ${path} version ${versionName}: ${e.toString()}")
                 return null
             } else { throw e }
