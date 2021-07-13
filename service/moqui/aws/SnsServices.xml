@@ -16,7 +16,8 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="publish" noun="SmsMessage">
         <in-parameters>
-            <parameter name="countryCode"/>
+            <parameter name="countryCode" default-value="1">
+                <description>For AWS SNS a country code is always required, defaults to 1 for North America</description></parameter>
             <parameter name="areaCode"/>
             <parameter name="contactNumber" required="true"/>
             <parameter name="message" required="true"/>
