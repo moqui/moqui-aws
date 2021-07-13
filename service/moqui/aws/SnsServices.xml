@@ -30,7 +30,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="countryCode &amp;&amp; !countryCode.trim().startsWith('+')">
                 <set field="countryCode" from="'+' + countryCode.trim()"/>
             </if>
-            <set field="phoneNumber" from="(countyCode?:'') + (areaCode?.trim()?:'') + (contactNumber?.trim()?:'')"/>
+            <set field="phoneNumber" from="(countryCode?:'') + (areaCode?.trim()?:'') + (contactNumber?.trim()?:'')"/>
             <set field="hasPlus" from="phoneNumber.startsWith('+')"/>
             <set field="phoneNumber" from="(hasPlus ? '+' : '') + phoneNumber.replaceAll('\\D', '')"/>
 
