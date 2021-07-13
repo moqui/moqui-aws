@@ -36,6 +36,14 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="hasPlus" from="phoneNumber.startsWith('+')"/>
             <set field="phoneNumber" from="(hasPlus ? '+' : '') + phoneNumber.replaceAll('\\D', '')"/>
 
+            <set field="snsClientFactory" from="ec.factory.getToolFactory('AwsSnsClient')"/>
+            <if condition="snsClientFactory == null">
+                <log message="AWS SNS tool not active, attempt to send [${message}] to ${phoneNumber}"/>
+                <set field="successful" from="false"/>
+                <set field="errorMessage" value="AWS SNS tool not active"/>
+                <return/>
+            </if>
+
             <script>
                 import software.amazon.awssdk.awscore.exception.AwsServiceException
                 import software.amazon.awssdk.services.sns.SnsClient
@@ -60,8 +68,7 @@ along with this software (see the LICENSE.md file). If not, see
                     successful = false
                 }
             </script>
-
+            <log message="Sent SMS message ID ${messageId} to ${phoneNumber}"/>
         </actions>
     </service>
-
 </services>
