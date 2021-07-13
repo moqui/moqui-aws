@@ -21,6 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="areaCode"/>
             <parameter name="contactNumber" required="true"/>
             <parameter name="message" required="true"/>
+            <parameter name="isPromotional" default="false" type="Boolean"/>
         </in-parameters>
         <out-parameters>
             <parameter name="successful" type="Boolean"/>
@@ -36,18 +37,18 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="phoneNumber" from="(hasPlus ? '+' : '') + phoneNumber.replaceAll('\\D', '')"/>
 
             <script>
+                import software.amazon.awssdk.awscore.exception.AwsServiceException
                 import software.amazon.awssdk.services.sns.SnsClient
+                import software.amazon.awssdk.services.sns.model.MessageAttributeValue
                 import software.amazon.awssdk.services.sns.model.PublishRequest
                 import software.amazon.awssdk.services.sns.model.PublishResponse
-                import software.amazon.awssdk.awscore.exception.AwsServiceException
 
                 try {
                     SnsClient snsClient = ec.getTool('AwsSnsClient', SnsClient.class)
 
-                    PublishRequest request = PublishRequest.builder()
-                        .message(message)
-                        .phoneNumber(phoneNumber)
-                        .build()
+                    Map smsAttributes = ["AWS.SNS.SMS.SMSType":MessageAttributeValue.builder().stringValue(isPromotional ? "Promotional" : "Transactional").dataType("String").build()]
+                    PublishRequest request = PublishRequest.builder().message((String) message).phoneNumber((String) phoneNumber)
+                        .messageAttributes(smsAttributes).build()
 
                     PublishResponse result = snsClient.publish(request)
 
