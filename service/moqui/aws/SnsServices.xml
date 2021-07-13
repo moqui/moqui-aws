@@ -32,12 +32,13 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <set field="phoneNumber" from="(countyCode?:'') + (areaCode?.trim()?:'') + (contactNumber?.trim()?:'')"/>
             <set field="hasPlus" from="phoneNumber.startsWith('+')"/>
-            <set field="phoneNumber" from="(hasPlus ? '+' : '') + phoneNumber.replaceAll('\D', '')"/>
+            <set field="phoneNumber" from="(hasPlus ? '+' : '') + phoneNumber.replaceAll('\\D', '')"/>
 
             <script>
                 import software.amazon.awssdk.services.sns.SnsClient
                 import software.amazon.awssdk.services.sns.model.PublishRequest
                 import software.amazon.awssdk.services.sns.model.PublishResponse
+                import software.amazon.awssdk.awscore.exception.AwsServiceException
 
                 try {
                     SnsClient snsClient = ec.getTool('AwsSnsClient', SnsClient.class)
@@ -49,7 +50,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                     PublishResponse result = snsClient.publish(request)
 
-                    messageId = result.getMessageId()
+                    messageId = result.messageId()
                     successful = true
                 } catch (Exception e) {
                     ec.logger.error('Error sending SMS message to ${phoneNumber}', e)
