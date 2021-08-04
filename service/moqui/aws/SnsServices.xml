@@ -63,7 +63,7 @@ along with this software (see the LICENSE.md file). If not, see
                     messageId = result.messageId()
                     successful = true
                 } catch (Exception e) {
-                    ec.logger.error('Error sending SMS message to ${phoneNumber}', e)
+                    ec.logger.error("Error sending SMS message to ${phoneNumber}", e)
                     errorMessage = (e instanceof AwsServiceException) ? ((AwsServiceException)e).awsErrorDetails().errorMessage() : e.getMessage()
                     successful = false
                 }
