@@ -19,7 +19,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="countryCode" default-value="1">
                 <description>For AWS SNS a country code is always required, defaults to 1 for North America</description></parameter>
             <parameter name="areaCode"/>
-            <parameter name="contactNumber" required="true"/>
+            <parameter name="contactNumber" required="true">
+                <description>If there is a single string for phone number pass it here, may include a country code if begins with '+'</description></parameter>
             <parameter name="message" required="true"/>
             <parameter name="isPromotional" default="false" type="Boolean"/>
         </in-parameters>
@@ -32,6 +33,9 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="countryCode &amp;&amp; !countryCode.trim().startsWith('+')">
                 <set field="countryCode" from="'+' + countryCode.trim()"/>
             </if>
+            <!-- don't prepend countryCode if areaCode starts with '+' or !areaCode and contactNumber starts with '+' -->
+            <if condition="(areaCode &amp;&amp; areaCode.startsWith('+')) || (!areaCode &amp;&amp; contactNumber.startsWith('+'))">
+                <set field="countryCode" from="null"/></if>
             <set field="phoneNumber" from="(countryCode?:'') + (areaCode?.trim()?:'') + (contactNumber?.trim()?:'')"/>
             <set field="hasPlus" from="phoneNumber.startsWith('+')"/>
             <set field="phoneNumber" from="(hasPlus ? '+' : '') + phoneNumber.replaceAll('\\D', '')"/>
