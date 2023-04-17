@@ -19,6 +19,7 @@ import org.moqui.context.ToolFactory
 import org.moqui.util.SystemBinding
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import software.amazon.awssdk.auth.credentials.ContainerCredentialsProvider
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.sns.SnsClient
 import software.amazon.awssdk.services.sns.SnsClientBuilder
@@ -49,6 +50,8 @@ class SnsClientToolFactory implements ToolFactory<SnsClient> {
         String awsRegion = SystemBinding.getPropOrEnv("AWS_REGION")
         String awsAccessKeyId = SystemBinding.getPropOrEnv("AWS_ACCESS_KEY_ID")
         String awsSecret = SystemBinding.getPropOrEnv("AWS_SECRET_ACCESS_KEY")
+        String awsContainerCredentialsRelativeURI = SystemBinding.getPropOrEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+        String awsContainerCredentialsFullURI = SystemBinding.getPropOrEnv("AWS_CONTAINER_CREDENTIALS_FULL_URI")
 
         // Non standard AWS, for example Minio.
         String awsEndpointURL = SystemBinding.getPropOrEnv("AWS_ENDPOINT_URL")
@@ -62,6 +65,7 @@ class SnsClientToolFactory implements ToolFactory<SnsClient> {
         SnsClientBuilder cb = SnsClient.builder()
         if (awsRegion) cb.region(Region.of(awsRegion))
         if (awsEndpointURL) cb.endpointOverride(new URI(awsEndpointURL))
+        if (awsContainerCredentialsRelativeURI || awsContainerCredentialsFullURI) cb.credentialsProvider(ContainerCredentialsProvider.builder().build())
         snsClient = cb.build()
     }
 
