@@ -65,7 +65,7 @@ class S3ClientToolFactory implements ToolFactory<S3Client> {
         S3ClientBuilder cb = S3Client.builder()
         if (awsRegion) cb.region(Region.of(awsRegion))
         if (awsEndpointURL) cb.endpointOverride(new URI(awsEndpointURL))
-        if (awsContainerCredentialsRelativeURI || awsContainerCredentialsFullURI) cb.credentialsProvider(ContainerCredentialsProvider.builder().build())
+        //if (awsContainerCredentialsRelativeURI || awsContainerCredentialsFullURI) cb.credentialsProvider(ContainerCredentialsProvider.builder().build())
         s3Client = cb.build()
     }
 

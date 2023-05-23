@@ -65,7 +65,7 @@ class SnsClientToolFactory implements ToolFactory<SnsClient> {
         SnsClientBuilder cb = SnsClient.builder()
         if (awsRegion) cb.region(Region.of(awsRegion))
         if (awsEndpointURL) cb.endpointOverride(new URI(awsEndpointURL))
-        if (awsContainerCredentialsRelativeURI || awsContainerCredentialsFullURI) cb.credentialsProvider(ContainerCredentialsProvider.builder().build())
+        //if (awsContainerCredentialsRelativeURI || awsContainerCredentialsFullURI) cb.credentialsProvider(ContainerCredentialsProvider.builder().build())
         snsClient = cb.build()
     }
 
