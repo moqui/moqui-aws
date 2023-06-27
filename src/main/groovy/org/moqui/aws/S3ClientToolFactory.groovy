@@ -19,10 +19,15 @@ import org.moqui.context.ToolFactory
 import org.moqui.util.SystemBinding
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import software.amazon.awssdk.auth.credentials.AwsSessionCredentials
 import software.amazon.awssdk.auth.credentials.ContainerCredentialsProvider
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3ClientBuilder
 import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.sts.StsClient
+import software.amazon.awssdk.services.sts.model.AssumeRoleRequest
+import software.amazon.awssdk.services.sts.model.Credentials
 
 /** A ToolFactory for AWS S3 Client */
 @CompileStatic
@@ -50,8 +55,8 @@ class S3ClientToolFactory implements ToolFactory<S3Client> {
         String awsRegion = SystemBinding.getPropOrEnv("AWS_REGION")
         String awsAccessKeyId = SystemBinding.getPropOrEnv("AWS_ACCESS_KEY_ID")
         String awsSecret = SystemBinding.getPropOrEnv("AWS_SECRET_ACCESS_KEY")
-        String awsContainerCredentialsRelativeURI = SystemBinding.getPropOrEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
-        String awsContainerCredentialsFullURI = SystemBinding.getPropOrEnv("AWS_CONTAINER_CREDENTIALS_FULL_URI")
+        String awsRoleArn = SystemBinding.getPropOrEnv("AWS_ROLE_ARN")
+        String awsSessionToken = null
 
         // Non standard AWS, for example Minio.
         String awsEndpointURL = SystemBinding.getPropOrEnv("AWS_ENDPOINT_URL")
@@ -62,10 +67,30 @@ class S3ClientToolFactory implements ToolFactory<S3Client> {
 
         logger.info("Starting AWS S3 Client with region ${awsRegion} access ID ${awsAccessKeyId}")
 
+        // assume role
+        if (awsRoleArn) {
+            // create STS client
+            StsClient stsClient = StsClient.builder()
+                    .region(Region.of(awsRegion))
+                    .build()
+
+            // obtain credentials for the IAM role
+            Credentials sessionCredentials = stsClient.assumeRole(AssumeRoleRequest.builder()
+                    .roleArn(awsRoleArn)
+                    .roleSessionName("MoquiSnsClient")
+                    .build() as AssumeRoleRequest
+            ).credentials()
+
+            // override credentials
+            awsAccessKeyId = sessionCredentials.accessKeyId()
+            awsSecret = sessionCredentials.secretAccessKey()
+            awsSessionToken = sessionCredentials.sessionToken()
+        }
+
         S3ClientBuilder cb = S3Client.builder()
         if (awsRegion) cb.region(Region.of(awsRegion))
         if (awsEndpointURL) cb.endpointOverride(new URI(awsEndpointURL))
-        //if (awsContainerCredentialsRelativeURI || awsContainerCredentialsFullURI) cb.credentialsProvider(ContainerCredentialsProvider.builder().build())
+        if (awsSessionToken) cb.credentialsProvider(StaticCredentialsProvider.create(AwsSessionCredentials.create(awsAccessKeyId, awsSecret, awsSessionToken)))
         s3Client = cb.build()
     }
 
