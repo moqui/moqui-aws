@@ -55,7 +55,7 @@ class S3ClientToolFactory implements ToolFactory<S3Client> {
         String awsRegion = SystemBinding.getPropOrEnv("AWS_REGION")
         String awsAccessKeyId = SystemBinding.getPropOrEnv("AWS_ACCESS_KEY_ID")
         String awsSecret = SystemBinding.getPropOrEnv("AWS_SECRET_ACCESS_KEY")
-        String awsRoleArn = SystemBinding.getPropOrEnv("AWS_ROLE_ARN")
+        String awsRoleArn = SystemBinding.getPropOrEnv("S3_AWS_ROLE_ARN") ?: SystemBinding.getPropOrEnv("AWS_ROLE_ARN")
         String awsSessionToken = null
 
         // Non standard AWS, for example Minio.
@@ -77,7 +77,7 @@ class S3ClientToolFactory implements ToolFactory<S3Client> {
             // obtain credentials for the IAM role
             Credentials sessionCredentials = stsClient.assumeRole(AssumeRoleRequest.builder()
                     .roleArn(awsRoleArn)
-                    .roleSessionName("MoquiSnsClient")
+                    .roleSessionName("MoquiS3Client")
                     .build() as AssumeRoleRequest
             ).credentials()
 

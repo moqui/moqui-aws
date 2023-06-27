@@ -54,7 +54,7 @@ class SnsClientToolFactory implements ToolFactory<SnsClient> {
         String awsRegion = SystemBinding.getPropOrEnv("AWS_REGION")
         String awsAccessKeyId = SystemBinding.getPropOrEnv("AWS_ACCESS_KEY_ID")
         String awsSecret = SystemBinding.getPropOrEnv("AWS_SECRET_ACCESS_KEY")
-        String awsRoleArn = SystemBinding.getPropOrEnv("AWS_ROLE_ARN")
+        String awsRoleArn = SystemBinding.getPropOrEnv("SNS_AWS_ROLE_ARN") ?: SystemBinding.getPropOrEnv("AWS_ROLE_ARN")
         String awsSessionToken = null
 
         // Non standard AWS, for example Minio.
