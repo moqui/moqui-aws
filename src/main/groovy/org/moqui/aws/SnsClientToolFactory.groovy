@@ -19,14 +19,12 @@ import org.moqui.context.ToolFactory
 import org.moqui.util.SystemBinding
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import software.amazon.awssdk.auth.credentials.AwsSessionCredentials
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.sns.SnsClient
 import software.amazon.awssdk.services.sns.SnsClientBuilder
 import software.amazon.awssdk.services.sts.StsClient
+import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider
 import software.amazon.awssdk.services.sts.model.AssumeRoleRequest
-import software.amazon.awssdk.services.sts.model.Credentials
 
 /** A ToolFactory for AWS SNS Client */
 @CompileStatic
@@ -55,7 +53,6 @@ class SnsClientToolFactory implements ToolFactory<SnsClient> {
         String awsAccessKeyId = SystemBinding.getPropOrEnv("AWS_ACCESS_KEY_ID")
         String awsSecret = SystemBinding.getPropOrEnv("AWS_SECRET_ACCESS_KEY")
         String awsRoleArn = SystemBinding.getPropOrEnv("SNS_AWS_ROLE_ARN") ?: SystemBinding.getPropOrEnv("AWS_ROLE_ARN")
-        String awsSessionToken = null
 
         // Non standard AWS, for example Minio.
         String awsEndpointURL = SystemBinding.getPropOrEnv("AWS_ENDPOINT_URL")
@@ -66,30 +63,13 @@ class SnsClientToolFactory implements ToolFactory<SnsClient> {
 
         logger.info("Starting AWS SNS Client with region ${awsRegion} access ID ${awsAccessKeyId}")
 
-        // assume role
-        if (awsRoleArn) {
-            // create STS client
-            StsClient stsClient = StsClient.builder()
-                    .region(Region.of(awsRegion))
-                    .build()
-
-            // obtain credentials for the IAM role
-            Credentials sessionCredentials = stsClient.assumeRole(AssumeRoleRequest.builder()
-                    .roleArn(awsRoleArn)
-                    .roleSessionName("MoquiSnsClient")
-                    .build() as AssumeRoleRequest
-            ).credentials()
-
-            // override credentials
-            awsAccessKeyId = sessionCredentials.accessKeyId()
-            awsSecret = sessionCredentials.secretAccessKey()
-            awsSessionToken = sessionCredentials.sessionToken()
-        }
-
         SnsClientBuilder cb = SnsClient.builder()
+        AssumeRoleRequest.Builder ab = AssumeRoleRequest.builder()
+        StsAssumeRoleCredentialsProvider.Builder sb = StsAssumeRoleCredentialsProvider.builder()
+        StsClient stsClient = StsClient.builder().region(Region.of(awsRegion)).build()
         if (awsRegion) cb.region(Region.of(awsRegion))
         if (awsEndpointURL) cb.endpointOverride(new URI(awsEndpointURL))
-        if (awsSessionToken) cb.credentialsProvider(StaticCredentialsProvider.create(AwsSessionCredentials.create(awsAccessKeyId, awsSecret, awsSessionToken)))
+        if (awsRoleArn) cb.credentialsProvider(sb.stsClient(stsClient).refreshRequest(ab.roleArn(awsRoleArn).roleSessionName("MoquiSnsClient").build() as AssumeRoleRequest).build())
         snsClient = cb.build()
     }
 
