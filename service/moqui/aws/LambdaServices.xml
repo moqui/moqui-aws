@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="invoke" noun="LambdaFunction">
+        <in-parameters>
+            <parameter name="functionName"/>
+            <parameter name="payload"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="successful" type="Boolean"/>
+            <parameter name="response" type="Object"/>
+            <parameter name="errorMessage"/>
+        </out-parameters>
+        <actions>
+            <set field="lambdaClientFactory" from="ec.factory.getToolFactory('AwsSnsClient')"/>
+            <if condition="lambdaClientFactory == null">
+                <log message="AWS Lambda tool not active, attempt to invoke function ${functionName}"/>
+                <set field="successful" from="false"/>
+                <set field="errorMessage" value="AWS Lambda tool not active"/>
+                <return/>
+            </if>
+
+            <script>
+                import software.amazon.awssdk.awscore.exception.AwsServiceException
+                import software.amazon.awssdk.core.SdkBytes
+                import software.amazon.awssdk.services.lambda.LambdaClient
+                import software.amazon.awssdk.services.lambda.model.InvokeRequest
+                import software.amazon.awssdk.services.lambda.model.InvokeResponse
+                import groovy.json.JsonSlurper
+
+                try {
+                    LambdaClient lambdaClient = ec.getTool('AwsLambdaClient', LambdaClient.class)
+
+                    InvokeRequest request = InvokeRequest.builder()
+                            .functionName(functionName as String)
+                            .payload(SdkBytes.fromUtf8String(payload as String))
+                            .build()
+
+                    InvokeResponse result = lambdaClient.invoke(request)
+
+                    response = new JsonSlurper().parse(result.payload().asUtf8String())
+                    successful = true
+                } catch (Exception e) {
+                    ec.logger.error("Error invoking Lambda function ${functionName}", e)
+                    errorMessage = (e instanceof AwsServiceException) ? ((AwsServiceException)e).awsErrorDetails().errorMessage() : e.getMessage()
+                    successful = false
+                }
+            </script>
+            <log message="Invoked function ${functionName}"/>
+        </actions>
+    </service>
+</services>
