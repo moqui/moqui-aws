@@ -26,6 +26,7 @@
     <tools>
         <tool-factory class="org.moqui.aws.S3ClientToolFactory" init-priority="40" disabled="false"/>
         <tool-factory class="org.moqui.aws.SnsClientToolFactory" init-priority="40" disabled="false"/>
+        <tool-factory class="org.moqui.aws.SqsClientToolFactory" init-priority="40" disabled="false"/>
     </tools>
     <resource-facade>
         <resource-reference scheme="aws3" class="org.moqui.aws.S3ResourceReference"/>

@@ -43,8 +43,9 @@ dependencies {
     implementation project(':framework')
 
     // AWS Java SDK for supported services (depends on core and kms jars)
-    implementation group: 'software.amazon.awssdk', name: 's3', version: '2.17.4' // Apache 2.0
-    implementation group: 'software.amazon.awssdk', name: 'sns', version: '2.17.4' // Apache 2.0
+    implementation group: 'software.amazon.awssdk', name: 's3', version: '2.23.4' // Apache 2.0
+    implementation group: 'software.amazon.awssdk', name: 'sns', version: '2.23.4' // Apache 2.0
+    implementation group: 'software.amazon.awssdk', name: 'sqs', version: '2.23.4' // Apache 2.0
 
     // explicit dependencies to get newer versions
     implementation 'io.netty:netty-codec-http:4.1.66.Final'
