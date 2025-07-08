@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="publish" noun="SmsMessage">
+        <in-parameters>
+            <parameter name="countryCode" default-value="1">
+                <description>For AWS SNS a country code is always required, defaults to 1 for North America</description></parameter>
+            <parameter name="areaCode"/>
+            <parameter name="contactNumber" required="true">
+                <description>If there is a single string for phone number pass it here, may include a country code if begins with '+'</description></parameter>
+            <parameter name="message" required="true"/>
+            <parameter name="isPromotional" default="false" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="successful" type="Boolean"/>
+            <parameter name="messageId"/>
+            <parameter name="errorMessage"/>
+        </out-parameters>
+        <actions>
+            <if condition="countryCode &amp;&amp; !countryCode.trim().startsWith('+')">
+                <set field="countryCode" from="'+' + countryCode.trim()"/>
+            </if>
+            <!-- don't prepend countryCode if areaCode starts with '+' or !areaCode and contactNumber starts with '+' -->
+            <if condition="(areaCode &amp;&amp; areaCode.startsWith('+')) || (!areaCode &amp;&amp; contactNumber.startsWith('+'))">
+                <set field="countryCode" from="null"/></if>
+            <set field="phoneNumber" from="(countryCode?:'') + (areaCode?.trim()?:'') + (contactNumber?.trim()?:'')"/>
+            <set field="hasPlus" from="phoneNumber.startsWith('+')"/>
+            <set field="phoneNumber" from="(hasPlus ? '+' : '') + phoneNumber.replaceAll('\\D', '')"/>
+
+            <set field="snsClientFactory" from="ec.factory.getToolFactory('AwsSnsClient')"/>
+            <if condition="snsClientFactory == null">
+                <log message="AWS SNS tool not active, attempt to send [${message}] to ${phoneNumber}"/>
+                <set field="successful" from="false"/>
+                <set field="errorMessage" value="AWS SNS tool not active"/>
+                <return/>
+            </if>
+
+            <script>
+                import software.amazon.awssdk.awscore.exception.AwsServiceException
+                import software.amazon.awssdk.services.sns.SnsClient
+                import software.amazon.awssdk.services.sns.model.MessageAttributeValue
+                import software.amazon.awssdk.services.sns.model.PublishRequest
+                import software.amazon.awssdk.services.sns.model.PublishResponse
+
+                try {
+                    SnsClient snsClient = ec.getTool('AwsSnsClient', SnsClient.class)
+
+                    Map smsAttributes = ["AWS.SNS.SMS.SMSType":MessageAttributeValue.builder().stringValue(isPromotional ? "Promotional" : "Transactional").dataType("String").build()]
+                    PublishRequest request = PublishRequest.builder().message((String) message).phoneNumber((String) phoneNumber)
+                        .messageAttributes(smsAttributes).build()
+
+                    PublishResponse result = snsClient.publish(request)
+
+                    messageId = result.messageId()
+                    successful = true
+                } catch (Exception e) {
+                    ec.logger.error("Error sending SMS message to ${phoneNumber}", e)
+                    errorMessage = (e instanceof AwsServiceException) ? ((AwsServiceException)e).awsErrorDetails().errorMessage() : e.getMessage()
+                    successful = false
+                }
+            </script>
+            <log message="Sent SMS message ID ${messageId} to ${phoneNumber}"/>
+        </actions>
+    </service>
+</services>

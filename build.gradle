@@ -14,7 +14,8 @@
 
 apply plugin: 'groovy'
 
-sourceCompatibility = '1.8'
+// sourceCompatibility = '1.8'
+
 version = '1.0.0'
 def jarBaseName = 'moqui-aws'
 def moquiDir = projectDir.parentFile.parentFile.parentFile
@@ -23,12 +24,15 @@ def frameworkDir = file(moquiDir.absolutePath + '/framework')
 // to run use "gradle dependencyUpdates"
 apply plugin: 'com.github.ben-manes.versions'
 buildscript {
-  repositories { jcenter() }
-  dependencies { classpath 'com.github.ben-manes:gradle-versions-plugin:0.20.0' }
+    repositories {
+        mavenCentral()
+        maven { url "https://plugins.gradle.org/m2/" }
+    }
+    dependencies { classpath 'com.github.ben-manes:gradle-versions-plugin:0.42.0' }
 }
 repositories {
     flatDir name: 'localLib', dirs: frameworkDir.absolutePath + '/lib'
-    jcenter()
+    mavenCentral()
 }
 
 // Log4J has annotation processors, disable to avoid warning
@@ -36,9 +40,16 @@ tasks.withType(JavaCompile) { options.compilerArgs << "-proc:none" }
 tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
 
 dependencies {
-    compile project(':framework')
-    // AWS Java SDK for S3 (depends on core and kms jars)
-    compile group: 'com.amazonaws', name: 'aws-java-sdk-s3', version: '1.11.371' // Apache 2.0
+    implementation project(':framework')
+
+    // AWS Java SDK for supported services (depends on core and kms jars)
+    implementation group: 'software.amazon.awssdk', name: 's3', version: '2.17.4' // Apache 2.0
+    implementation group: 'software.amazon.awssdk', name: 'sns', version: '2.17.4' // Apache 2.0
+
+    // explicit dependencies to get newer versions
+    implementation 'io.netty:netty-codec-http:4.1.66.Final'
+    implementation 'io.netty:netty-codec-http2:4.1.66.Final'
+    implementation 'io.netty:netty-transport-native-epoll:4.1.66.Final'
 }
 
 // by default the Java plugin runs test on build, change to not do that (only run test if explicit task)
@@ -53,7 +64,7 @@ jar {
     baseName = jarBaseName
 }
 task copyDependencies { doLast {
-    copy { from (configurations.runtime - project(':framework').configurations.runtime - project(':framework').jar.archivePath)
+    copy { from (configurations.runtimeClasspath - project(':framework').configurations.runtimeClasspath - project(':framework').jar.archivePath)
         into file(projectDir.absolutePath + '/lib') }
 } }
 copyDependencies.dependsOn cleanLib

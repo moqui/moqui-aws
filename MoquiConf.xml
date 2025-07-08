@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!-- No copyright or license for configuration file, details here are not considered a creative work. -->
-<moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-2.1.xsd">
+<moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
     <!-- set these in System env vars or in a Moqui Conf XML file like this -->
     <!-- https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/setup-credentials.html -->
     <!-- https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html -->
@@ -10,6 +10,9 @@
     <default-property name="AWS_REGION" value=""/>
     <default-property name="AWS_ACCESS_KEY_ID" value=""/>
     <default-property name="AWS_SECRET_ACCESS_KEY" value=""/>
+
+    <!-- Support non standard s3 service, for example Minio -->
+    <default-property name="AWS_ENDPOINT_URL" value=""/>
 
     <!-- these must be used in pairs, if alias used in a aws3://{bucket}/... then is replaced with name -->
     <!-- only 3 sets here by default, code looks for 1-9 -->
@@ -22,6 +25,7 @@
 
     <tools>
         <tool-factory class="org.moqui.aws.S3ClientToolFactory" init-priority="40" disabled="false"/>
+        <tool-factory class="org.moqui.aws.SnsClientToolFactory" init-priority="40" disabled="false"/>
     </tools>
     <resource-facade>
         <resource-reference scheme="aws3" class="org.moqui.aws.S3ResourceReference"/>
